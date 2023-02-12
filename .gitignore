@@ -4,3 +4,7 @@ backend/jspm_packages
 
 # Serverless directories
 backend/.serverless
+
+.DS_Store
+.editorconfig
+.prettierrc.json
