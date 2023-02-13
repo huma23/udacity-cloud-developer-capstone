@@ -17,3 +17,8 @@ export async function createPresignedUploadUrl(todoId: string) : Promise<string>
     logger.info('created presigned url')
     return url
 }
+
+export async function deleteTodo(userId: string, todoId: string) {
+    await dataAccess.deleteTodo(userId, todoId)
+    await fileAccess.deleteAudioFile(todoId)
+}

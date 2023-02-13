@@ -25,4 +25,14 @@ export class TranscriptDataAccess {
         const todos = result.Items as Transcript[];
         return todos
     }
+
+    async deleteTodo(userId: string, todoId: string): Promise<void> {
+        await this.docClient.delete({
+            TableName: this.transcriptTable,
+            Key: {
+                todoId: todoId,
+                userId: userId
+            }
+        });
+    }
 }

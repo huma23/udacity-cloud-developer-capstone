@@ -1,7 +1,7 @@
 import * as AWSXRAY from "aws-xray-sdk"
 
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 export class FileAccess {
 
@@ -12,13 +12,23 @@ export class FileAccess {
         )
     {}
 
-    async createPresignedUploadUrl(todoId: string): Promise<string>{
+    async createPresignedUploadUrl(transcriptId: string): Promise<string>{
 
         const command = new PutObjectCommand({
             Bucket: this.bucketName,
-            Key: todoId
+            Key: transcriptId
         });
         
         return await getSignedUrl(this.s3client, command, { expiresIn: this.urlExpiration });
+    }
+
+    async deleteAudioFile(transcriptId: string) { 
+
+        const command = new DeleteObjectCommand({
+            Bucket: this.bucketName,
+            Key: transcriptId
+        });
+
+        await this.s3client.send(command);
     }
 }
