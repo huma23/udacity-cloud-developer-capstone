@@ -7,7 +7,7 @@ export class FileAccess {
 
     constructor(
         private readonly s3client : S3Client = AWSXRAY.captureAWSv3Client(new S3Client({})),
-        private readonly bucketName: string = process.env.ATTACHMENT_S3_BUCKET,
+        private readonly bucketName: string = process.env.AUDIOFILES_S3_BUCKET,
         private readonly urlExpiration: number = Number.parseInt(process.env.SIGNED_URL_EXPIRATION)
         )
     {}

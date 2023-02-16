@@ -1,14 +1,203 @@
-service: backend
+org: huma23
+app: serverless-transcript-app
+service: serverless-transcript-app
 frameworkVersion: '3'
+
+plugins:
+  - serverless-webpack
+  - serverless-iam-roles-per-function
+  - serverless-plugin-tracing
+  - serverless-reqvalidator-plugin
+  - serverless-aws-documentation
 
 provider:
   name: aws
   runtime: nodejs18.x
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-west-1'}
+
+  tracing:
+    lambda: true
+    apiGateway: true
+
+  environment:
+    TRANSCRIPT_TABLE: Transcript-${self:provider.stage}
+    TRANSCRIPT_CREATED_AT_INDEX: CreatedAtIndex
+    AUDIOFILES_S3_BUCKET: serverless-audiofiles-${self:provider.stage}
+    TRANSCRIPTS_S3_BUCKET: serverless-transcripts-${self:provider.stage}
+    AUDIOFILES_BASE_URL: s3://{self.provider.region}/
+    SIGNED_URL_EXPIRATION: 300
+
+  logs:
+    restApi: true
+
+  iam:
+    role:
+      statements:
+      - Effect: Allow
+        Action:
+          - xray:PutTelemetryRecords
+          - xray:PutTraceSegments
+        Resource: "*"
 
 functions:
-  api:
-    handler: index.handler
+  Auth:
+    handler: src/lambda/auth/authorizer.handler
+
+  CreateTranscript:
+    handler: src/lambda/whisper/createTranscription.handler
     events:
-      - httpApi:
-          path: /
+      - s3:
+          bucket: ${self:provider.environment.AUDIOFILES_S3_BUCKET}
+          event: s3:ObjectCreated:*
+          existing: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - transcribe:StartTranscriptionJob
+          - s3:GetObject
+          - s3:PutObject
+        Resource: 
+          - arn:aws:s3:::${self:provider.environment.AUDIOFILES_S3_BUCKET}/*
+          - arn:aws:s3:::${self:provider.environment.TRANSCRIPTS_S3_BUCKET}/*
+
+  GetTranscripts:
+    handler: src/lambda/http/getTranscripts.handler
+    events:
+      - http:
           method: get
+          path: transcripts
+          cors: true
+          #authorizer: Auth
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Query
+        Resource: 
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TRANSCRIPT_TABLE}
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TRANSCRIPT_TABLE}/index/${self:provider.environment.TRANSCRIPT_CREATED_AT_INDEX}
+ 
+  DeleteTranscript:
+    handler: src/lambda/http/deleteTranscript.handler
+    events:
+      - http:
+          method: delete
+          path: transcripts/{transcriptId}
+          cors: true
+          #authorizer: Auth
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:DeleteItem
+          - s3:DeleteObject
+        Resource: 
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TRANSCRIPT_TABLE}
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TRANSCRIPT_TABLE}/index/${self:provider.environment.TRANSCRIPT_CREATED_AT_INDEX}
+          - arn:aws:s3:::${self:provider.environment.AUDIOFILES_S3_BUCKET}/*
+
+resources:
+  Resources:
+    GatewayResponseDefault4XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+          gatewayresponse.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST,PATCH,DELETE'"
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: ApiGatewayRestApi
+    
+    TranscriptsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: transcriptId
+            AttributeType: S
+          - AttributeName: createdAt
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+          - AttributeName: transcriptId
+            KeyType: RANGE
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${self:provider.environment.TRANSCRIPT_TABLE}
+        LocalSecondaryIndexes:
+          - IndexName: ${self:provider.environment.TRANSCRIPT_CREATED_AT_INDEX}
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    AudioFilesBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.AUDIOFILES_S3_BUCKET}
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins:
+                - '*'
+              AllowedHeaders:
+                - '*'
+              AllowedMethods:
+                - GET
+                - PUT
+                - POST
+                - DELETE
+                - HEAD
+              MaxAge: 3000
+
+    TranscriptsBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.TRANSCRIPTS_S3_BUCKET}
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins:
+                - '*'
+              AllowedHeaders:
+                - '*'
+              AllowedMethods:
+                - GET
+                - PUT
+                - POST
+                - DELETE
+                - HEAD
+              MaxAge: 3000
+
+    BucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        PolicyDocument:
+          Id: Policy
+          Version: "2012-10-17"
+          Statement:
+            - Sid: PublicReadForGetBucketObjects
+              Effect: Allow
+              Principal: '*'
+              Action: 's3:GetObject'
+              Resource: 'arn:aws:s3:::${self:provider.environment.AUDIOFILES_S3_BUCKET}/*'
+        Bucket: !Ref AudioFilesBucket
+
+    RequestBodyValidator:
+      Type: AWS::ApiGateway::RequestValidator
+      Properties:
+        Name: 'request-body-validator'
+        RestApiId:
+          Ref: ApiGatewayRestApi
+        ValidateRequestBody: true
+        ValidateRequestParameters: false
+
+custom: 
+  documentation:
+    api:
+      info:
+        version: v1.0.0
+        title: Serverless Transcription API
+        description: Serverless application creating transcripts
