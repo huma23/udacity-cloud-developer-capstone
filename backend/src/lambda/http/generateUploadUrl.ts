@@ -6,19 +6,17 @@ import cors from '@middy/http-cors'
 import httpErrorHandler from '@middy/http-error-handler'
 import { createLogger } from '../../utils/logging/logger'
 import { getUserId } from '../auth/tokenUtils'
-import { createPresignedUploadUrl } from '../../business/transcriptBusiness'
+import { createImageAndPresignedUploadUrl } from '../../business/imageBusiness'
 
 const logger = createLogger('GET upload-url')
 
 export const handler = middy(
   async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
 
-    const transcriptId = event.pathParameters.transcriptId
-    logger.info('transcriptId', transcriptId)
     const userId = getUserId(event)
     logger.info('userId', userId)
 
-    const url = await createPresignedUploadUrl(transcriptId)
+    const url = await createImageAndPresignedUploadUrl(userId)
     logger.info('url created')
 
     return {

@@ -12,21 +12,21 @@ plugins:
 
 provider:
   name: aws
-  runtime: nodejs18.x
   stage: ${opt:stage, 'dev'}
   region: ${opt:region, 'us-west-1'}
+  runtime: nodejs18.x
 
   tracing:
     lambda: true
     apiGateway: true
 
   environment:
-    TRANSCRIPT_TABLE: Transcript-${self:provider.stage}
-    TRANSCRIPT_CREATED_AT_INDEX: CreatedAtIndex
-    AUDIOFILES_S3_BUCKET: serverless-audiofiles-${self:provider.stage}
-    TRANSCRIPTS_S3_BUCKET: serverless-transcripts-${self:provider.stage}
-    AUDIOFILES_BASE_URL: s3://{self.provider.region}/
+    IMAGES_TABLE: images-${self:provider.stage}
+    IMAGES_CREATED_AT_INDEX: CreatedAtIndex
+    IMAGES_S3_BUCKET: images-s3-${self:provider.stage}
     SIGNED_URL_EXPIRATION: 300
+    IMAGGA_KEY: ${param:<imagga_key>}
+    IMAGGA_SECRET: ${param:<imagga_secret>}
 
   logs:
     restApi: true
@@ -44,56 +44,78 @@ functions:
   Auth:
     handler: src/lambda/auth/authorizer.handler
 
-  CreateTranscript:
-    handler: src/lambda/whisper/createTranscription.handler
-    events:
-      - s3:
-          bucket: ${self:provider.environment.AUDIOFILES_S3_BUCKET}
-          event: s3:ObjectCreated:*
-          existing: true
-    iamRoleStatements:
-      - Effect: Allow
-        Action:
-          - transcribe:StartTranscriptionJob
-          - s3:GetObject
-          - s3:PutObject
-        Resource: 
-          - arn:aws:s3:::${self:provider.environment.AUDIOFILES_S3_BUCKET}/*
-          - arn:aws:s3:::${self:provider.environment.TRANSCRIPTS_S3_BUCKET}/*
-
-  GetTranscripts:
-    handler: src/lambda/http/getTranscripts.handler
+  GetImages:
+    handler: src/lambda/http/getImages.handler
     events:
       - http:
           method: get
-          path: transcripts
+          path: images
           cors: true
-          #authorizer: Auth
+          authorizer: Auth
     iamRoleStatements:
       - Effect: Allow
         Action:
           - dynamodb:Query
         Resource: 
-          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TRANSCRIPT_TABLE}
-          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TRANSCRIPT_TABLE}/index/${self:provider.environment.TRANSCRIPT_CREATED_AT_INDEX}
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.IMAGES_TABLE}
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.IMAGES_TABLE}/index/${self:provider.environment.IMAGES_CREATED_AT_INDEX}
  
-  DeleteTranscript:
-    handler: src/lambda/http/deleteTranscript.handler
+  DeleteImage:
+    handler: src/lambda/http/deleteImage.handler
     events:
       - http:
           method: delete
-          path: transcripts/{transcriptId}
+          path: images/{imageId}
           cors: true
-          #authorizer: Auth
+          authorizer: Auth
     iamRoleStatements:
       - Effect: Allow
         Action:
           - dynamodb:DeleteItem
           - s3:DeleteObject
         Resource: 
-          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TRANSCRIPT_TABLE}
-          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TRANSCRIPT_TABLE}/index/${self:provider.environment.TRANSCRIPT_CREATED_AT_INDEX}
-          - arn:aws:s3:::${self:provider.environment.AUDIOFILES_S3_BUCKET}/*
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.IMAGES_TABLE}
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.IMAGES_TABLE}/index/${self:provider.environment.IMAGES_CREATED_AT_INDEX}
+          - arn:aws:s3:::${self:provider.environment.IMAGES_S3_BUCKET}/*
+
+  CreatePrediction:
+    handler: src/lambda/prediction/createPrediction.handler
+    events:
+      - s3:
+          bucket: ${self:provider.environment.IMAGES_S3_BUCKET}
+          event: s3:ObjectCreated:*
+          existing: true
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - s3:GetObject
+          - dynamodb:UpdateItem
+        Resource: 
+          - arn:aws:s3:::${self:provider.environment.IMAGES_S3_BUCKET}/*
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.IMAGES_TABLE}
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.IMAGES_TABLE}/index/${self:provider.environment.IMAGES_CREATED_AT_INDEX}
+
+  GenerateUploadUrl:
+    handler: src/lambda/http/generateUploadUrl.handler
+    events:
+      - http:
+          method: post
+          path: images
+          cors: true
+          authorizer: Auth
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+        Resource: 
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.IMAGES_TABLE}
+          - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.IMAGES_TABLE}/index/${self:provider.environment.IMAGES_CREATED_AT_INDEX}
+      - Effect: Allow
+        Action:
+          - s3:GetObject
+          - s3:PutObject
+        Resource: arn:aws:s3:::${self:provider.environment.IMAGES_S3_BUCKET}/*
+
 
 resources:
   Resources:
@@ -108,25 +130,23 @@ resources:
         RestApiId:
           Ref: ApiGatewayRestApi
     
-    TranscriptsTable:
+    ImagesTable:
       Type: AWS::DynamoDB::Table
       Properties:
         AttributeDefinitions:
           - AttributeName: userId
             AttributeType: S
-          - AttributeName: transcriptId
+          - AttributeName: imageId
             AttributeType: S
           - AttributeName: createdAt
             AttributeType: S
         KeySchema:
-          - AttributeName: userId
+          - AttributeName: imageId
             KeyType: HASH
-          - AttributeName: transcriptId
-            KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
-        TableName: ${self:provider.environment.TRANSCRIPT_TABLE}
-        LocalSecondaryIndexes:
-          - IndexName: ${self:provider.environment.TRANSCRIPT_CREATED_AT_INDEX}
+        TableName: ${self:provider.environment.IMAGES_TABLE}
+        GlobalSecondaryIndexes:
+          - IndexName: ${self:provider.environment.IMAGES_CREATED_AT_INDEX}
             KeySchema:
               - AttributeName: userId
                 KeyType: HASH
@@ -135,28 +155,10 @@ resources:
             Projection:
               ProjectionType: ALL
 
-    AudioFilesBucket:
+    ImagesBucket:
       Type: AWS::S3::Bucket
       Properties:
-        BucketName: ${self:provider.environment.AUDIOFILES_S3_BUCKET}
-        CorsConfiguration:
-          CorsRules:
-            - AllowedOrigins:
-                - '*'
-              AllowedHeaders:
-                - '*'
-              AllowedMethods:
-                - GET
-                - PUT
-                - POST
-                - DELETE
-                - HEAD
-              MaxAge: 3000
-
-    TranscriptsBucket:
-      Type: AWS::S3::Bucket
-      Properties:
-        BucketName: ${self:provider.environment.TRANSCRIPTS_S3_BUCKET}
+        BucketName: ${self:provider.environment.IMAGES_S3_BUCKET}
         CorsConfiguration:
           CorsRules:
             - AllowedOrigins:
@@ -182,8 +184,8 @@ resources:
               Effect: Allow
               Principal: '*'
               Action: 's3:GetObject'
-              Resource: 'arn:aws:s3:::${self:provider.environment.AUDIOFILES_S3_BUCKET}/*'
-        Bucket: !Ref AudioFilesBucket
+              Resource: 'arn:aws:s3:::${self:provider.environment.IMAGES_S3_BUCKET}/*'
+        Bucket: !Ref ImagesBucket
 
     RequestBodyValidator:
       Type: AWS::ApiGateway::RequestValidator

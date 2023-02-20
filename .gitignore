@@ -4,7 +4,14 @@ backend/jspm_packages
 
 # Serverless directories
 backend/.serverless
+backend/.requirements
+backend/.webpack
+backend/serverless_sdk
+
+requirements.zip
 
 .DS_Store
 .editorconfig
 .prettierrc.json
+.python-version
+.requirements.zip
