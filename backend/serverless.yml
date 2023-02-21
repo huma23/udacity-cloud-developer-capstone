@@ -9,6 +9,7 @@ plugins:
   - serverless-plugin-tracing
   - serverless-reqvalidator-plugin
   - serverless-aws-documentation
+  - serverless-secrets-plugin
 
 provider:
   name: aws
@@ -25,8 +26,8 @@ provider:
     IMAGES_CREATED_AT_INDEX: CreatedAtIndex
     IMAGES_S3_BUCKET: images-s3-${self:provider.stage}
     SIGNED_URL_EXPIRATION: 300
-    IMAGGA_KEY: ${param:<imagga_key>}
-    IMAGGA_SECRET: ${param:<imagga_secret>}
+    IMAGGA_KEY: ${self:custom.secrets.IMAGGA_KEY}
+    IMAGGA_SECRET: ${self:custom.secrets.IMAGGA_SECRET}
 
   logs:
     restApi: true
@@ -203,3 +204,4 @@ custom:
         version: v1.0.0
         title: Serverless Transcription API
         description: Serverless application creating transcripts
+  secrets: ${file(secrets.${opt:stage, self:provider.stage}.yml)}
